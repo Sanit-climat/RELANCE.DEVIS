@@ -65,6 +65,18 @@
     border-radius: 8px; font-size: 14px; background: #fff;
   }
   select.filter { padding: 9px 12px; border: 1px solid var(--line); border-radius: 8px; font-size: 14px; background: #fff; color: var(--text); }
+  .res-filter-wrap { position: relative; display: inline-block; }
+  #filterResidenceInput { padding: 9px 12px; padding-right: 26px; border: 1px solid var(--line); border-radius: 8px; font-size: 14px; background: #fff; min-width: 200px; font-family: inherit; }
+  #filterResidenceInput:focus { outline: 2px solid var(--orange); outline-offset: -1px; border-color: var(--orange); }
+  #filterResidenceInput.active { border-color: var(--orange); font-weight: 600; }
+  .res-filter-clear { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); border: none; background: none; cursor: pointer; font-size: 18px; color: var(--muted); line-height: 1; padding: 0 4px; }
+  .res-filter-clear:hover { color: var(--red); }
+  .res-filter-list { position: absolute; top: calc(100% + 4px); left: 0; right: 0; max-height: 320px; overflow-y: auto; background: #fff; border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.12); z-index: 40; min-width: 280px; }
+  .res-filter-opt { padding: 8px 12px; font-size: 13.5px; cursor: pointer; display: flex; justify-content: space-between; gap: 10px; align-items: center; }
+  .res-filter-opt:hover, .res-filter-opt.kbsel { background: var(--orange-soft); }
+  .res-filter-opt .rcount { font-size: 12px; color: var(--muted); }
+  .res-filter-opt.all-opt { border-bottom: 1px solid var(--line); font-weight: 600; color: var(--navy); }
+  .res-filter-empty { padding: 12px; font-size: 13px; color: var(--muted); text-align: center; }
   .btn {
     border: none; border-radius: 8px; padding: 9px 16px; font-size: 14px; font-weight: 600;
     cursor: pointer; font-family: inherit; transition: filter .12s;
@@ -135,6 +147,14 @@
   .rl-agencyfix { display: flex; align-items: center; gap: 5px; }
   .rl-agencyfix select { padding: 4px 8px; border: 1px solid #6b3fa0; border-radius: 6px; font-size: 12px; font-family: inherit; }
   .res-card.torattach .res-head { background: #fdf3d8; }
+  .res-check { width: 18px; height: 18px; accent-color: var(--orange); cursor: pointer; flex-shrink: 0; margin-right: 4px; }
+  .res-card.selected { border-color: var(--orange); box-shadow: 0 0 0 1px var(--orange); }
+  .merge-bar { position: sticky; top: 0; z-index: 30; background: var(--navy); color: #fff; border-radius: var(--radius); padding: 12px 16px; margin-bottom: 14px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; box-shadow: 0 4px 12px rgba(0,0,0,.15); }
+  .merge-bar.hidden { display: none; }
+  .merge-bar .mb-count { font-weight: 700; font-size: 14px; }
+  .merge-bar select { padding: 7px 10px; border-radius: 7px; border: none; font-size: 13px; font-family: inherit; min-width: 200px; }
+  .merge-bar .mb-label { font-size: 13px; color: #b9c6e0; }
+  .merge-bar input[type=text] { padding: 7px 10px; border-radius: 7px; border: none; font-size: 13px; font-family: inherit; text-transform: uppercase; min-width: 180px; }
   .res-card.torattach .res-head .agency { color: #9a6700; font-weight: 700; }
   .chev { transition: transform .15s; color: var(--muted); }
   .res-card.open .chev { transform: rotate(90deg); }
@@ -243,6 +263,12 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     <button class="btn btn-ghost btn-sm" id="pdfClear" onclick="clearPdfs()" style="display:none">Vider</button>
   </div>
 
+  <div class="pdf-bar" style="margin-top:-6px;">
+    <input type="file" id="xlsInput" accept=".xlsx,.xls" style="display:none" onchange="onExcelImport(event)">
+    <button class="btn btn-navy btn-sm" onclick="document.getElementById('xlsInput').click()">📊 Importer un Excel (autres bailleurs)</button>
+    <span class="status" id="xlsStatus" style="color:var(--muted);font-size:12.5px;">Format identique à l'export ERILIA — le bailleur est détecté automatiquement (modifiable).</span>
+  </div>
+
   <div class="stats" id="stats"></div>
 
   <div id="view-liste">
@@ -266,12 +292,19 @@ https://github.com/nodeca/pako/blob/main/LICENSE
       <option value="overdue">À relancer (en retard)</option>
       <option value="soon">Échéance ≤ 7 jours</option>
     </select>
+    <select class="filter" id="filterBailleur">
+      <option value="">Tous bailleurs</option>
+    </select>
     <select class="filter" id="filterAgence">
       <option value="">Toutes agences</option>
     </select>
-    <select class="filter" id="filterResidence">
-      <option value="">Toutes résidences</option>
-    </select>
+    <div class="res-filter-wrap">
+      <input type="text" class="filter" id="filterResidenceInput" placeholder="Résidence : taper pour filtrer…" autocomplete="off"
+             oninput="onResFilterInput()" onfocus="onResFilterInput()" onkeydown="onResFilterKey(event)">
+      <input type="hidden" id="filterResidence" value="">
+      <button type="button" id="resFilterClear" class="res-filter-clear" onclick="clearResFilter()" style="display:none">×</button>
+      <div class="res-filter-list" id="resFilterList" style="display:none"></div>
+    </div>
     <select class="filter" id="filterStatut">
       <option value="actif">À relancer (actifs)</option>
       <option value="">Tous statuts</option>
@@ -325,6 +358,14 @@ https://github.com/nodeca/pako/blob/main/LICENSE
         <option value="travaux">Travaux à prévoir</option>
         <option value="regul">Régularisation</option>
       </select>
+    </div>
+    <div class="merge-bar hidden" id="mergeBar">
+      <span class="mb-count" id="mergeCount">0 sélectionnée(s)</span>
+      <span class="mb-label">Fusionner sous le nom :</span>
+      <select id="mergeTarget"></select>
+      <input type="text" id="mergeCustom" placeholder="…ou autre nom">
+      <button class="btn btn-primary btn-sm" onclick="mergeSelected()">Fusionner la sélection</button>
+      <button class="btn btn-ghost btn-sm" onclick="clearMergeSelection()">Annuler</button>
     </div>
     <div id="resList"></div>
   </div>
@@ -450,13 +491,14 @@ function load() {
       let changed = false;
       existing.forEach(x => {
         if (!x.agence) { x.agence = seedByNum[x.devis] || 'À RATTACHER'; changed = true; }
+        if (!x.bailleur) { x.bailleur = 'ERILIA'; changed = true; }
       });
       if (changed) localStorage.setItem(STORE, JSON.stringify(existing));
       return existing;
     }
   } catch {}
   const seeded = SEED.map(s => ({
-    id: uid(), devis: s.devis, client: s.client, agence: s.agence||'À RATTACHER', montant: s.montant,
+    id: uid(), devis: s.devis, client: s.client, bailleur: s.bailleur||'ERILIA', agence: s.agence||'À RATTACHER', montant: s.montant,
     dateEnvoi: s.dateEnvoi, objet: s.objet, tag: s.tag||'',
     type: s.type||'travaux', statut: s.statut||'actif', residence: s.residence||'NON IDENTIFIÉE',
     email: s.email||'', contact: s.contact||'', notes: s.notes||'',
@@ -549,6 +591,7 @@ function refreshAll() {
     const fa = document.getElementById('filterAgence');
     const ra = document.getElementById('resAgence');
     if (fa) { const v=fa.value; fa.querySelectorAll('option:not(:first-child)').forEach(o=>o.remove()); fillAgences(); fa.value=v; }
+    fillBailleurs();
     if (ra) { const v=ra.value; ra.querySelectorAll('option:not(:first-child)').forEach(o=>o.remove()); fillResAgences(); ra.value=v; }
     fillResidenceDatalist();
     fillResidenceFilter();
@@ -734,14 +777,16 @@ function getFiltered() {
   const fl = document.getElementById('filterLevel').value;
   const fd = document.getElementById('filterDue').value;
   const ft = document.getElementById('filterType').value;
+  const fbail = document.getElementById('filterBailleur').value;
   const fa = document.getElementById('filterAgence').value;
   const fres = document.getElementById('filterResidence').value;
   const fs = document.getElementById('filterStatut').value;
   const fe = document.getElementById('filterExpire').value;
   let list = data.filter(x => {
-    if (q && !(`${x.devis} ${x.client} ${x.objet||''} ${x.contact||''} ${x.residence||''}`.toLowerCase().includes(q))) return false;
+    if (q && !(`${x.devis} ${x.client} ${x.objet||''} ${x.contact||''} ${x.residence||''} ${x.bailleur||''}`.toLowerCase().includes(q))) return false;
     if (fl !== '' && String(x.niveau||0) !== fl) return false;
     if (ft !== '' && (x.type||'travaux') !== ft) return false;
+    if (fbail !== '' && (x.bailleur||'ERILIA') !== fbail) return false;
     if (fa !== '' && (x.agence||'À RATTACHER') !== fa) return false;
     if (fres !== '' && (x.residence||'NON IDENTIFIÉE') !== fres) return false;
     if (fs !== '' && (x.statut||'actif') !== fs) return false;
@@ -950,11 +995,31 @@ function statutBadge(s) {
 function truncate(s,n){ s=String(s||''); return s.length>n?s.slice(0,n)+'…':s; }
 function esc(s) { return String(s||'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 
-function agencyList() {
-  const set = [...new Set(data.map(x => x.agence||'À RATTACHER'))];
+function agencyList(bailleur) {
+  // Si un bailleur est précisé, ne lister que ses agences
+  const src = bailleur ? data.filter(x => (x.bailleur||'ERILIA')===bailleur) : data;
+  const set = [...new Set(src.map(x => x.agence||'À RATTACHER'))];
   const rattach = set.filter(a => a==='À RATTACHER');
   const rest = set.filter(a => a!=='À RATTACHER').sort();
   return [...rest, ...rattach];
+}
+function bailleurList() {
+  const set = [...new Set(data.map(x => x.bailleur||'ERILIA'))];
+  return set.sort();
+}
+function fillBailleurs() {
+  const sel = document.getElementById('filterBailleur');
+  if (!sel) return;
+  const cur = sel.value;
+  sel.querySelectorAll('option:not(:first-child)').forEach(o => o.remove());
+  const counts = {};
+  data.forEach(x => { const b = x.bailleur||'ERILIA'; counts[b]=(counts[b]||0)+1; });
+  bailleurList().forEach(b => {
+    const o = document.createElement('option');
+    o.value = b; o.textContent = `${b} (${counts[b]||0})`;
+    sel.appendChild(o);
+  });
+  if ([...sel.options].some(o => o.value === cur)) sel.value = cur;
 }
 function fillResAgences() {
   const sel = document.getElementById('resAgence');
@@ -962,36 +1027,240 @@ function fillResAgences() {
 }
 function fillAgences() {
   const sel = document.getElementById('filterAgence');
-  agencyList().forEach(a => { const o = document.createElement('option'); o.value = a; o.textContent = a; sel.appendChild(o); });
-}
-function fillResidenceFilter() {
-  const sel = document.getElementById('filterResidence');
-  if (!sel) return;
   const cur = sel.value;
-  // garder la 1ère option, retirer les autres
   sel.querySelectorAll('option:not(:first-child)').forEach(o => o.remove());
+  // limiter aux agences du bailleur sélectionné, le cas échéant
+  const fbail = (document.getElementById('filterBailleur')||{}).value || '';
+  agencyList(fbail||undefined).forEach(a => { const o = document.createElement('option'); o.value = a; o.textContent = a; sel.appendChild(o); });
+  if ([...sel.options].some(o => o.value === cur)) sel.value = cur;
+}
+function residenceCounts() {
   const set = {};
   data.forEach(x => { const r = x.residence || 'NON IDENTIFIÉE'; set[r] = (set[r]||0)+1; });
-  // tri alpha, NON IDENTIFIÉE à la fin
-  const names = Object.keys(set).sort((a,b) => {
+  return set;
+}
+function fillResidenceFilter() {
+  // Reconstruit l'affichage du champ selon la valeur sélectionnée (hidden input)
+  const hidden = document.getElementById('filterResidence');
+  const input = document.getElementById('filterResidenceInput');
+  const clearBtn = document.getElementById('resFilterClear');
+  if (!hidden || !input) return;
+  const cur = hidden.value;
+  if (cur) {
+    const counts = residenceCounts();
+    input.value = cur + (counts[cur] ? ` (${counts[cur]})` : '');
+    input.classList.add('active');
+    if (clearBtn) clearBtn.style.display = '';
+  } else {
+    if (document.activeElement !== input) input.value = '';
+    input.classList.remove('active');
+    if (clearBtn) clearBtn.style.display = 'none';
+  }
+}
+
+let _resFilterKbIndex = -1;
+function onResFilterInput() {
+  const input = document.getElementById('filterResidenceInput');
+  const listEl = document.getElementById('resFilterList');
+  const q = input.value.toLowerCase().trim();
+  const counts = residenceCounts();
+  let names = Object.keys(counts).sort((a,b) => {
     if (a==='NON IDENTIFIÉE') return 1; if (b==='NON IDENTIFIÉE') return -1;
     return a.localeCompare(b);
   });
-  names.forEach(r => {
-    const o = document.createElement('option');
-    o.value = r; o.textContent = `${r} (${set[r]})`;
-    sel.appendChild(o);
-  });
-  if ([...sel.options].some(o => o.value === cur)) sel.value = cur;
+  // filtre "contient"
+  if (q) names = names.filter(r => r.toLowerCase().includes(q));
+  _resFilterKbIndex = -1;
+  let html = `<div class="res-filter-opt all-opt" onclick="pickResFilter('')">Toutes les résidences</div>`;
+  if (!names.length) {
+    html += `<div class="res-filter-empty">Aucune résidence ne contient « ${esc(input.value.trim())} »</div>`;
+  } else {
+    html += names.slice(0, 200).map(r =>
+      `<div class="res-filter-opt" onclick="pickResFilter('${esc(r).replace(/'/g,"\\'")}')">
+        <span>${esc(r)}</span><span class="rcount">${counts[r]}</span>
+      </div>`).join('');
+    if (names.length > 200) html += `<div class="res-filter-empty">… ${names.length-200} autres, affine ta recherche</div>`;
+  }
+  listEl.innerHTML = html;
+  listEl.style.display = '';
 }
-['search','filterLevel','filterDue','filterType','filterAgence','filterResidence','filterStatut','filterExpire'].forEach(id => {
+function pickResFilter(val) {
+  document.getElementById('filterResidence').value = val;
+  document.getElementById('resFilterList').style.display = 'none';
+  fillResidenceFilter();
+  render();
+}
+function clearResFilter() {
+  document.getElementById('filterResidenceInput').value = '';
+  pickResFilter('');
+}
+function onResFilterKey(e) {
+  const listEl = document.getElementById('resFilterList');
+  if (listEl.style.display === 'none') return;
+  const opts = [...listEl.querySelectorAll('.res-filter-opt')];
+  if (e.key === 'ArrowDown') { e.preventDefault(); _resFilterKbIndex = Math.min(_resFilterKbIndex+1, opts.length-1); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); _resFilterKbIndex = Math.max(_resFilterKbIndex-1, 0); }
+  else if (e.key === 'Enter') { e.preventDefault(); if (opts[_resFilterKbIndex]) opts[_resFilterKbIndex].click(); else if (opts[1]) opts[1].click(); return; }
+  else if (e.key === 'Escape') { listEl.style.display = 'none'; return; }
+  else return;
+  opts.forEach((o,i) => o.classList.toggle('kbsel', i===_resFilterKbIndex));
+  if (opts[_resFilterKbIndex]) opts[_resFilterKbIndex].scrollIntoView({block:'nearest'});
+}
+// Fermer la liste si on clique ailleurs
+document.addEventListener('click', e => {
+  const wrap = document.querySelector('.res-filter-wrap');
+  if (wrap && !wrap.contains(e.target)) {
+    const l = document.getElementById('resFilterList');
+    if (l) l.style.display = 'none';
+    fillResidenceFilter(); // restaure l'affichage de la sélection
+  }
+});
+['search','filterLevel','filterDue','filterType','filterAgence','filterStatut','filterExpire'].forEach(id => {
   const el = document.getElementById(id);
   el.addEventListener(id==='search'?'input':'change', render);
+});
+document.getElementById('filterBailleur').addEventListener('change', () => {
+  // réinitialiser le filtre agence et le reconstruire pour le bailleur choisi
+  document.getElementById('filterAgence').value = '';
+  fillAgences();
+  render();
 });
 document.getElementById('overlay').addEventListener('click', e => { if(e.target.id==='overlay') closeModal(); });
 
 
 /* ========== PDF en mémoire (IndexedDB) ========== */
+/* ========== Import Excel multi-bailleurs (SheetJS chargé à la demande) ========== */
+let _xlsxLib = null;
+function loadSheetJS() {
+  if (_xlsxLib) return Promise.resolve(_xlsxLib);
+  if (window.XLSX) { _xlsxLib = window.XLSX; return Promise.resolve(_xlsxLib); }
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js';
+    s.onload = () => { _xlsxLib = window.XLSX; resolve(_xlsxLib); };
+    s.onerror = () => reject(new Error('Impossible de charger la librairie Excel (vérifie ta connexion).'));
+    document.head.appendChild(s);
+  });
+}
+
+// Détecte le bailleur à partir du contenu (client/agence) ou du nom de fichier
+function detectBailleur(rows, fileName) {
+  const hay = (fileName + ' ' + rows.slice(0, 40).map(r => Object.values(r).join(' ')).join(' ')).toUpperCase();
+  const known = ['VILOGIA', '3F SUD', '3F', '1001 VIES HABITAT', '1001 VIES', 'LOGIS MEDITERRANEE', 'SFHE', 'AP-HM', 'APHM',
+                 '13 HABITAT', 'TOULON HABITAT', 'CARRE SYNDIC', 'GUIS', 'FONCIA', 'ERILIA', 'LOGIREM'];
+  for (const k of known) { if (hay.includes(k)) return k === 'LOGIREM' ? 'ERILIA' : (k==='3F' ? '3F SUD' : (k==='1001 VIES' ? '1001 VIES HABITAT' : (k==='APHM'?'AP-HM':k))); }
+  return null; // inconnu -> on demandera
+}
+
+// Normalise une ligne Excel (même format que l'export ERILIA) vers un devis
+function rowToDevis(r, bailleur) {
+  // tolérance sur les noms de colonnes
+  const get = (...keys) => { for (const k of keys) { for (const col in r) { if (col.toLowerCase().trim() === k.toLowerCase()) return r[col]; } } return ''; };
+  const devisNum = String(get('Référence','Reference','N° devis','Numéro','Devis')||'').trim();
+  if (!devisNum) return null;
+  const typeDoc = String(get('Type de document','Type')||'').toLowerCase();
+  const detail = String(get('Détail du devis','Detail du devis','Détail','Objet')||'').trim();
+  const tag = String(get('Tag','Étiquette')||'').trim();
+  const contact = String(get('Contact','Client')||'').trim();
+  const totalTTC = get('Total','Total TTC','Montant');
+  let dateRaw = get("Date d'envoi","Date envoi",'Date');
+  // Date Excel -> ISO
+  let dateEnvoi = '';
+  if (dateRaw instanceof Date) dateEnvoi = dateRaw.toISOString().slice(0,10);
+  else if (typeof dateRaw === 'number') { const d = new Date(Math.round((dateRaw - 25569) * 86400 * 1000)); dateEnvoi = d.toISOString().slice(0,10); }
+  else if (dateRaw) { const m = String(dateRaw).match(/(\d{2})\/(\d{2})\/(\d{4})/); if (m) dateEnvoi = `${m[3]}-${m[2]}-${m[1]}`; else { const d = new Date(dateRaw); if (!isNaN(d)) dateEnvoi = d.toISOString().slice(0,10); } }
+  if (!dateEnvoi) dateEnvoi = todayISO();
+  // type travaux/regul/autre
+  const blob = (detail + ' ' + tag + ' ' + typeDoc).toLowerCase();
+  let type = 'autre';
+  if (/regul|régul/.test(blob)) type = 'regul';
+  else if (/travaux|à prévoir|a prevoir/.test(blob)) type = 'travaux';
+  else if (detail) type = 'travaux';
+  // statut
+  let statut = 'actif';
+  if (/annul/i.test(tag)) statut = 'annule';
+  else if (/déjà factur|deja factur/i.test(tag)) statut = 'facture';
+  else if (/a facturer|à facturer/i.test(tag)) statut = 'a_facturer';
+  // montant
+  let montant = 0;
+  if (typeof totalTTC === 'number') montant = totalTTC;
+  else if (totalTTC) montant = parseFloat(String(totalTTC).replace(/[^\d,.-]/g,'').replace(',','.')) || 0;
+  // résidence : extraction simple depuis le détail
+  let residence = extractResidence(detail) || 'NON IDENTIFIÉE';
+  return {
+    devis: devisNum, client: contact || bailleur, bailleur,
+    agence: 'À RATTACHER', montant, dateEnvoi, objet: detail, tag,
+    type, statut, residence, email:'', contact:'', notes:'',
+    delai: 10
+  };
+}
+
+// Extraction résidence basique (réutilise la logique "à la résidence X")
+function extractResidence(detail) {
+  if (!detail) return '';
+  let m = detail.match(/r[ée]sidence\s+(.+?)(?:\s+(?:selon|suite|pour|relatif|au\s|bt|marché|lot|\-)|$)/i);
+  if (m && m[1]) return m[1].replace(/[.\s]+$/,'').trim().toUpperCase().slice(0,60);
+  return '';
+}
+
+async function onExcelImport(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const statusEl = document.getElementById('xlsStatus');
+  statusEl.style.color = 'var(--navy)';
+  statusEl.textContent = 'Lecture du fichier…';
+  try {
+    const XLSX = await loadSheetJS();
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, { cellDates: true });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+    if (!rows.length) { statusEl.textContent = 'Fichier vide ou illisible.'; return; }
+
+    // Détecter le bailleur
+    let bailleur = detectBailleur(rows, file.name);
+    if (!bailleur) {
+      bailleur = (prompt('Bailleur non reconnu automatiquement.\nSaisis le nom du bailleur pour ce fichier :', '') || '').trim().toUpperCase();
+      if (!bailleur) { statusEl.textContent = 'Import annulé (bailleur non renseigné).'; e.target.value=''; return; }
+    } else {
+      const ok = confirm(`Bailleur détecté : « ${bailleur} ».\n\nOK pour confirmer, Annuler pour saisir un autre nom.`);
+      if (!ok) { const b = (prompt('Nom du bailleur :', bailleur)||'').trim().toUpperCase(); if (b) bailleur = b; }
+    }
+
+    // Convertir + dédoublonner par n° de devis (ne pas écraser l'existant)
+    const existingNums = new Set(data.map(x => x.devis));
+    let added = 0, skipped = 0, ignored = 0;
+    rows.forEach(r => {
+      const d = rowToDevis(r, bailleur);
+      if (!d) { ignored++; return; }
+      if (existingNums.has(d.devis)) { skipped++; return; }
+      existingNums.add(d.devis);
+      data.push({
+        id: uid(), ...d,
+        niveau: 0, derniereRelance: null,
+        prochaine: d.dateEnvoi ? addDays(d.dateEnvoi, d.delai||10) : todayISO(),
+        historique: []
+      });
+      added++;
+    });
+
+    save();
+    fillBailleurs();
+    fillAgences();
+    fillResidenceDatalist();
+    fillResidenceFilter();
+    render();
+    statusEl.style.color = 'var(--green)';
+    statusEl.innerHTML = `<b>✓ ${added} devis importés</b> pour « ${esc(bailleur)} »` +
+      (skipped ? ` · ${skipped} déjà présents (ignorés)` : '') +
+      (ignored ? ` · ${ignored} lignes sans n° de devis` : '');
+  } catch (err) {
+    statusEl.style.color = '#c0392b';
+    statusEl.textContent = 'Erreur : ' + (err.message || err);
+  }
+  e.target.value = '';
+}
+
 let pdfMap = {}; // devisNum -> {name, size}
 const IDB_NAME = 'sanit_pdf_store';
 let _db = null;
@@ -1340,6 +1609,55 @@ function setResidence(id) {
   render();
 }
 
+/* ===== Fusion manuelle de résidences par sélection ===== */
+let mergeSel = new Set(); // noms de résidences sélectionnés
+
+function toggleMergeSelect(name) {
+  if (mergeSel.has(name)) mergeSel.delete(name);
+  else mergeSel.add(name);
+  updateMergeBar();
+  // refléter la classe selected sans tout re-render
+  renderResidences();
+}
+function clearMergeSelection() {
+  mergeSel.clear();
+  updateMergeBar();
+  renderResidences();
+}
+function updateMergeBar() {
+  const bar = document.getElementById('mergeBar');
+  const cnt = document.getElementById('mergeCount');
+  const sel = document.getElementById('mergeTarget');
+  if (!bar) return;
+  if (mergeSel.size < 1) { bar.classList.add('hidden'); return; }
+  bar.classList.remove('hidden');
+  cnt.textContent = `${mergeSel.size} résidence(s) sélectionnée(s)`;
+  // proposer comme nom par défaut le plus fréquent parmi la sélection
+  const counts = residenceCounts();
+  const chosen = [...mergeSel].sort((a,b) => (counts[b]||0)-(counts[a]||0));
+  sel.innerHTML = chosen.map(n => `<option value="${esc(n)}">${esc(n)} (${counts[n]||0} devis)</option>`).join('');
+}
+
+function mergeSelected() {
+  if (mergeSel.size < 2) { alert('Sélectionne au moins 2 résidences à fusionner.'); return; }
+  const custom = document.getElementById('mergeCustom').value.trim().toUpperCase();
+  const target = custom || document.getElementById('mergeTarget').value;
+  if (!target) { alert('Choisis un nom de résidence à conserver.'); return; }
+  const names = new Set(mergeSel);
+  const list = [...names].join('\n  • ');
+  if (!confirm(`Fusionner ces résidences :\n\n  • ${list}\n\nsous le nom « ${target} » ?`)) return;
+  let n = 0;
+  data.forEach(x => { if (names.has(x.residence)) { x.residence = target; n++; } });
+  save();
+  mergeSel.clear();
+  fillResidenceDatalist();
+  fillResidenceFilter();
+  updateMergeBar();
+  renderResidences();
+  render();
+  alert(`✓ ${n} devis rattachés à « ${target} ».`);
+}
+
 function renderResidences() {
   const groups = groupByResidence();
   const wrap = document.getElementById('resList');
@@ -1365,9 +1683,11 @@ function renderResidences() {
         <span class="money-cell">${fmtMoney(x.montant)}</span>
         <span class="rl-pdf ${pdfMap[x.devis]?'has-pdf':'no-pdf'}">${pdfMap[x.devis]?'📄 PDF':'✕ pas de PDF'}</span>
       </div>`).join('');
-    return `<div class="res-card${g.res==='NON IDENTIFIÉE'?' unidentified open':''}${g.agency==='À RATTACHER'?' torattach open':''}" id="rescard-${i}">
-      <div class="res-head" onclick="document.getElementById('rescard-${i}').classList.toggle('open')">
-        <div>
+    return `<div class="res-card${g.res==='NON IDENTIFIÉE'?' unidentified open':''}${g.agency==='À RATTACHER'?' torattach open':''}${mergeSel.has(g.res)?' selected':''}" id="rescard-${i}">
+      <div class="res-head">
+        <input type="checkbox" class="res-check" ${mergeSel.has(g.res)?'checked':''}
+               title="Sélectionner pour fusion" onclick="event.stopPropagation()" onchange="toggleMergeSelect('${esc(g.res).replace(/'/g,"\\'")}')">
+        <div onclick="document.getElementById('rescard-${i}').classList.toggle('open')" style="flex:1;cursor:pointer;">
           <span class="chev">▶</span>
           <span class="name">${esc(g.res)}</span>
           <div class="sub">${g.items.length} devis · ${g.withPdf}/${g.items.length} avec PDF · <span class="agency">${esc(g.agency)}</span></div>
@@ -1384,6 +1704,7 @@ function renderResidences() {
     </div>`;
   }).join('');
   window._resGroups = groups;
+  if (typeof updateMergeBar === 'function') updateMergeBar();
 }
 
 function mailResidence(i) {
@@ -1434,6 +1755,7 @@ async function zipResidence(i) {
 
 loadPdfMap();
 data = load();
+fillBailleurs();
 fillAgences();
 fillResAgences();
 fillResidenceDatalist();
