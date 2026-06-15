@@ -139,6 +139,21 @@
   .chev { transition: transform .15s; color: var(--muted); }
   .res-card.open .chev { transform: rotate(90deg); }
   .filters-row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-bottom: 14px; }
+  .dup-card { background: #fff; border: 1px solid var(--line); border-radius: var(--radius); margin-bottom: 12px; padding: 14px 16px; }
+  .dup-card.ignored { opacity: .5; }
+  .dup-card.merged { border-color: var(--green); background: var(--green-soft); }
+  .dup-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 10px; flex-wrap: wrap; }
+  .dup-head .count { font-size: 12px; color: var(--muted); }
+  .dup-variants { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+  .dup-variant { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 7px; cursor: pointer; font-size: 13.5px; }
+  .dup-variant:hover { background: #fafbfc; }
+  .dup-variant.chosen { border-color: var(--orange); background: var(--orange-soft); font-weight: 600; }
+  .dup-variant input[type=radio] { accent-color: var(--orange); }
+  .dup-variant .vcount { margin-left: auto; font-size: 12px; color: var(--muted); }
+  .dup-custom { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+  .dup-custom input { flex: 1; padding: 7px 10px; border: 1px solid var(--line); border-radius: 7px; font-size: 13px; text-transform: uppercase; }
+  .dup-actions { display: flex; gap: 8px; }
+  .merged-tag { color: var(--green); font-weight: 700; font-size: 13px; }
 
   .due { font-weight: 600; }
   .due.overdue { color: var(--red); }
@@ -214,6 +229,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
   <div class="tabs">
     <div class="tab active" id="tab-liste" onclick="switchTab('liste')">Liste des devis</div>
     <div class="tab" id="tab-residence" onclick="switchTab('residence')">Vue par résidence</div>
+    <div class="tab" id="tab-doublons" onclick="switchTab('doublons')">Doublons résidences</div>
   </div>
 
   <div class="pdf-bar">
@@ -303,6 +319,20 @@ https://github.com/nodeca/pako/blob/main/LICENSE
       </select>
     </div>
     <div id="resList"></div>
+  </div>
+
+  <div id="view-doublons" style="display:none;">
+    <div style="background:#fff;border:1px solid var(--line);border-radius:var(--radius);padding:14px 16px;margin-bottom:16px;">
+      <div style="font-size:14px;color:var(--text);margin-bottom:6px;"><strong>Regroupement des résidences en doublon</strong></div>
+      <div style="font-size:13px;color:var(--muted);line-height:1.5;">
+        L'outil a détecté des résidences qui se ressemblent (article en trop, pluriel, accent, faute de frappe).
+        Pour chaque groupe, choisis le nom à conserver puis clique <strong>Fusionner</strong> — tous les devis du groupe seront rattachés à ce nom.
+        Si ce ne sont pas de vrais doublons, clique <strong>Ignorer</strong>.
+      </div>
+      <div style="font-size:12.5px;color:var(--amber);margin-top:8px;">⚠ Vérifie les résidences numérotées (BOTINE 1 / 2 / 3, MOLIERES 1 / 2) : ce sont souvent des résidences différentes.</div>
+    </div>
+    <div id="dupStats" style="margin-bottom:14px;font-size:13px;color:var(--muted);"></div>
+    <div id="dupList"></div>
   </div>
 </div>
 
@@ -568,6 +598,16 @@ function saveDevis() {
   if (!devis || !client || !dateEnvoi) { alert('N° de devis, client et date d\'envoi sont obligatoires.'); return; }
   const id = document.getElementById('f-id').value;
   const delai = parseInt(document.getElementById('f-delai').value) || 10;
+  // Anti-doublon résidence
+  let resVal = document.getElementById('f-residence').value.trim().toUpperCase();
+  if (resVal) {
+    const similar = findSimilarResidence(resVal);
+    if (similar && similar.toUpperCase() !== resVal) {
+      if (confirm(`Une résidence très proche existe déjà :\n\n« ${similar} »\n\nUtiliser ce nom existant plutôt que « ${resVal} » ?`)) {
+        resVal = similar;
+      }
+    }
+  }
   const payload = {
     devis, client, dateEnvoi, delai,
     montant: document.getElementById('f-montant').value,
@@ -577,7 +617,7 @@ function saveDevis() {
     notes: document.getElementById('f-notes').value.trim(),
     type: document.getElementById('f-type').value,
     statut: document.getElementById('f-statut').value,
-    residence: (document.getElementById('f-residence').value.trim().toUpperCase()) || 'NON IDENTIFIÉE',
+    residence: resVal || 'NON IDENTIFIÉE',
     agence: document.getElementById('f-agence').value || 'À RATTACHER',
   };
   if (id) {
@@ -1008,12 +1048,144 @@ function updatePdfStatus() {
 }
 
 /* ========== Onglets ========== */
+
+/* ========== Détection et fusion des doublons de résidences ========== */
+let ignoredDups = JSON.parse(localStorage.getItem('sanit_ignored_dups') || '[]');
+
+function residenceStop(w) {
+  return ['LE','LA','LES','DE','DES','DU','D','L','RESIDENCE','RES','CCAS'].includes(w);
+}
+function resNormalize(s) {
+  s = (s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,''); // enlève accents
+  s = s.replace(/[^A-Za-z0-9 ]/g,' ').toUpperCase();
+  return s.split(/\s+/).filter(w => w && !residenceStop(w));
+}
+function resSignature(s) {
+  const words = resNormalize(s).map(w => {
+    let r = w;
+    if (r.indexOf('GORG') >= 0) r = r.replace(/(UETTES|UETTE|ETTES|ETTE)$/, 'GORGROOT');
+    r = r.replace(/S$/, ''); // pluriel simple
+    return r;
+  });
+  // garder les nombres tels quels pour distinguer BOTINE 1/2/3
+  return words.slice().sort().join('|');
+}
+
+function detectDoublons() {
+  // compter les résidences distinctes
+  const counts = {};
+  data.forEach(x => {
+    const r = x.residence;
+    if (r && r !== 'NON IDENTIFIÉE') counts[r] = (counts[r]||0) + 1;
+  });
+  // grouper par signature
+  const groups = {};
+  Object.keys(counts).forEach(r => {
+    const sig = resSignature(r);
+    (groups[sig] = groups[sig] || []).push(r);
+  });
+  // ne garder que les groupes de 2+ variantes, non ignorés
+  return Object.entries(groups)
+    .filter(([sig, vs]) => vs.length > 1 && !ignoredDups.includes(sig))
+    .map(([sig, vs]) => {
+      const variants = vs.map(v => ({ name: v, count: counts[v] }))
+                         .sort((a,b) => b.count - a.count);
+      const total = variants.reduce((s,v)=> s+v.count, 0);
+      return { sig, variants, total, chosen: variants[0].name };
+    })
+    .sort((a,b) => b.total - a.total);
+}
+
+let _dupGroups = [];
+function renderDoublons() {
+  _dupGroups = detectDoublons();
+  const wrap = document.getElementById('dupList');
+  const stats = document.getElementById('dupStats');
+  if (!_dupGroups.length) {
+    stats.textContent = '';
+    wrap.innerHTML = '<div class="empty"><div class="big">Aucun doublon à traiter 🎉</div><div>Toutes les résidences sont distinctes (ou déjà fusionnées / ignorées).</div></div>';
+    return;
+  }
+  stats.innerHTML = `<strong>${_dupGroups.length}</strong> groupe(s) de doublons potentiels détecté(s).`;
+  wrap.innerHTML = _dupGroups.map((g, i) => {
+    const variants = g.variants.map(v => `
+      <label class="dup-variant ${v.name===g.chosen?'chosen':''}">
+        <input type="radio" name="dup-${i}" value="${esc(v.name)}" ${v.name===g.chosen?'checked':''}
+               onchange="setDupChoice(${i}, this.value)">
+        <span>${esc(v.name)}</span>
+        <span class="vcount">${v.count} devis</span>
+      </label>`).join('');
+    return `<div class="dup-card" id="dupcard-${i}">
+      <div class="dup-head">
+        <div><strong>Groupe ${i+1}</strong> <span class="count">— ${g.variants.length} variantes · ${g.total} devis au total</span></div>
+      </div>
+      <div class="dup-variants">${variants}</div>
+      <div class="dup-custom">
+        <input type="text" id="dupcustom-${i}" placeholder="…ou saisir un autre nom à utiliser"
+               oninput="if(this.value.trim()) setDupChoice(${i}, this.value.trim().toUpperCase(), true)">
+      </div>
+      <div class="dup-actions">
+        <button class="btn btn-primary btn-sm" onclick="mergeDup(${i})">Fusionner vers « <span id="duptarget-${i}">${esc(g.chosen)}</span> »</button>
+        <button class="btn btn-ghost btn-sm" onclick="ignoreDup(${i})">Ignorer ce groupe</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function setDupChoice(i, name, fromCustom) {
+  _dupGroups[i].chosen = name;
+  const tgt = document.getElementById('duptarget-' + i);
+  if (tgt) tgt.textContent = name;
+  if (!fromCustom) {
+    // refléter visuellement la sélection radio
+    const card = document.getElementById('dupcard-' + i);
+    card.querySelectorAll('.dup-variant').forEach(el => {
+      el.classList.toggle('chosen', el.querySelector('input').value === name);
+    });
+    const ci = document.getElementById('dupcustom-' + i);
+    if (ci) ci.value = '';
+  }
+}
+
+function mergeDup(i) {
+  const g = _dupGroups[i];
+  const target = (g.chosen || '').trim().toUpperCase();
+  if (!target) { alert('Choisis un nom de résidence à conserver.'); return; }
+  const names = new Set(g.variants.map(v => v.name));
+  let n = 0;
+  data.forEach(x => {
+    if (names.has(x.residence)) { x.residence = target; n++; }
+  });
+  save();
+  const card = document.getElementById('dupcard-' + i);
+  card.classList.add('merged');
+  card.innerHTML = `<div class="merged-tag">✓ Fusionné : ${n} devis rattachés à « ${esc(target)} »</div>`;
+  fillResidenceDatalist();
+}
+
+function ignoreDup(i) {
+  const g = _dupGroups[i];
+  ignoredDups.push(g.sig);
+  localStorage.setItem('sanit_ignored_dups', JSON.stringify(ignoredDups));
+  const card = document.getElementById('dupcard-' + i);
+  card.classList.add('ignored');
+  card.innerHTML = `<div style="color:var(--muted);font-size:13px;">Groupe ignoré (variantes considérées comme des résidences distinctes). <a href="#" onclick="restoreDup('${g.sig}');return false;" style="color:var(--orange);">Annuler</a></div>`;
+}
+function restoreDup(sig) {
+  ignoredDups = ignoredDups.filter(s => s !== sig);
+  localStorage.setItem('sanit_ignored_dups', JSON.stringify(ignoredDups));
+  renderDoublons();
+}
+
 function switchTab(t) {
   document.getElementById('tab-liste').classList.toggle('active', t==='liste');
   document.getElementById('tab-residence').classList.toggle('active', t==='residence');
+  document.getElementById('tab-doublons').classList.toggle('active', t==='doublons');
   document.getElementById('view-liste').style.display = t==='liste' ? '' : 'none';
   document.getElementById('view-residence').style.display = t==='residence' ? '' : 'none';
+  document.getElementById('view-doublons').style.display = t==='doublons' ? '' : 'none';
   if (t==='residence') renderResidences();
+  if (t==='doublons') renderDoublons();
 }
 
 /* ========== Vue par résidence ========== */
@@ -1070,11 +1242,32 @@ function setAgence(id) {
   renderResidences();
   render();
 }
+function existingResidences() {
+  const set = new Set();
+  data.forEach(x => { if (x.residence && x.residence !== 'NON IDENTIFIÉE') set.add(x.residence); });
+  return [...set];
+}
+function findSimilarResidence(val) {
+  // 1) correspondance exacte déjà gérée ailleurs ; ici on cherche une proximité forte
+  const sig = resSignature(val);
+  const exact = existingResidences().find(r => r.toUpperCase() === val.toUpperCase());
+  if (exact) return null; // déjà existant à l'identique, pas de doublon créé
+  const match = existingResidences().find(r => resSignature(r) === sig);
+  return match || null;
+}
+
 function setResidence(id) {
   const inp = document.getElementById('fix-' + id);
   if (!inp) return;
-  const val = inp.value.trim().toUpperCase();
+  let val = inp.value.trim().toUpperCase();
   if (!val) { inp.focus(); return; }
+  // Anti-doublon : proposer une résidence existante très proche
+  const similar = findSimilarResidence(val);
+  if (similar && similar.toUpperCase() !== val) {
+    if (confirm(`Une résidence très proche existe déjà :\n\n« ${similar} »\n\nVoulez-vous utiliser ce nom existant plutôt que créer « ${val} » ?\n\nOK = utiliser « ${similar} »  ·  Annuler = garder « ${val} »`)) {
+      val = similar;
+    }
+  }
   const x = data.find(d => d.id === id);
   if (!x) return;
   x.residence = val;
