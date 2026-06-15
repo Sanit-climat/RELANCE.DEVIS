@@ -1194,7 +1194,7 @@ function rowToDevis(r, bailleur) {
   let residence = extractResidence(detail) || 'NON IDENTIFIÉE';
   return {
     devis: devisNum, client: contact || bailleur, bailleur,
-    agence: 'À RATTACHER', montant, dateEnvoi, objet: detail, tag,
+    agence: (bailleur === 'ERILIA' ? 'À RATTACHER' : bailleur), montant, dateEnvoi, objet: detail, tag,
     type, statut, residence, email:'', contact:'', notes:'',
     delai: 10
   };
