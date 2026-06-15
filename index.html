@@ -146,6 +146,10 @@
   .res-card.unidentified .res-head .name { color: #c0392b; }
   .rl-agencyfix { display: flex; align-items: center; gap: 5px; }
   .rl-agencyfix select { padding: 4px 8px; border: 1px solid #6b3fa0; border-radius: 6px; font-size: 12px; font-family: inherit; }
+  .ag-group-fix { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 8px 16px; background: #fdf3d8; border-top: 1px dashed #d4a72c; }
+  .ag-group-fix label { font-size: 12.5px; color: #8a6d1a; font-weight: 600; }
+  .ag-group-fix input { padding: 6px 10px; border: 1px solid #d4a72c; border-radius: 6px; font-size: 13px; font-family: inherit; text-transform: uppercase; min-width: 220px; }
+  .ag-group-fix input:focus { outline: 2px solid var(--orange); outline-offset: -1px; }
   .res-card.torattach .res-head { background: #fdf3d8; }
   .res-check { width: 18px; height: 18px; accent-color: var(--orange); cursor: pointer; flex-shrink: 0; margin-right: 4px; }
   .res-card.selected { border-color: var(--orange); box-shadow: 0 0 0 1px var(--orange); }
@@ -595,6 +599,7 @@ function refreshAll() {
     if (ra) { const v=ra.value; ra.querySelectorAll('option:not(:first-child)').forEach(o=>o.remove()); fillResAgences(); ra.value=v; }
     fillResidenceDatalist();
     fillResidenceFilter();
+    fillAgenceDatalists();
     updatePdfStatus();
   } catch {}
   render();
@@ -1247,6 +1252,7 @@ async function onExcelImport(e) {
     save();
     fillBailleurs();
     fillAgences();
+    fillAgenceDatalists();
     fillResidenceDatalist();
     fillResidenceFilter();
     render();
@@ -1550,6 +1556,48 @@ function setAgence(id) {
   renderResidences();
   render();
 }
+
+function setAgenceGroup(i) {
+  const g = window._resGroups[i];
+  if (!g) return;
+  const inp = document.getElementById('agroup-' + i);
+  if (!inp) return;
+  const val = inp.value.trim().toUpperCase();
+  if (!val) { inp.focus(); return; }
+  const ids = new Set(g.items.map(x => x.id));
+  let n = 0;
+  data.forEach(x => { if (ids.has(x.id)) { x.agence = val; n++; } });
+  save();
+  fillAgences();
+  if (typeof fillResAgences === 'function') {
+    const ra = document.getElementById('resAgence');
+    if (ra) { const v = ra.value; ra.querySelectorAll('option:not(:first-child)').forEach(o=>o.remove()); fillResAgences(); ra.value = v; }
+  }
+  fillAgenceDatalists();
+  renderResidences();
+  render();
+}
+
+// Datalists d'agences par bailleur (pour autocomplétion du champ d'affectation groupée)
+function fillAgenceDatalists() {
+  let host = document.getElementById('agence-datalists');
+  if (!host) {
+    host = document.createElement('div');
+    host.id = 'agence-datalists';
+    host.style.display = 'none';
+    document.body.appendChild(host);
+  }
+  const byBailleur = {};
+  data.forEach(x => {
+    const b = (x.bailleur||'ERILIA'); const a = (x.agence||'À RATTACHER');
+    if (a === 'À RATTACHER') return;
+    (byBailleur[b] = byBailleur[b] || new Set()).add(a);
+  });
+  host.innerHTML = Object.entries(byBailleur).map(([b, set]) => {
+    const id = 'agence-list-' + b.replace(/[^A-Za-z0-9]/g,'');
+    return `<datalist id="${id}">${[...set].sort().map(a=>`<option value="${esc(a)}">`).join('')}</datalist>`;
+  }).join('');
+}
 function existingResidences() {
   const set = new Set();
   data.forEach(x => { if (x.residence && x.residence !== 'NON IDENTIFIÉE') set.add(x.residence); });
@@ -1700,6 +1748,13 @@ function renderResidences() {
           </div>
         </div>
       </div>
+      ${torattach ? `<div class="ag-group-fix" onclick="event.stopPropagation()">
+        <label>Affecter l'agence aux ${g.items.length} devis :</label>
+        <input type="text" id="agroup-${i}" list="agence-list-${esc(g.items[0]&&g.items[0].bailleur||'ERILIA').replace(/[^A-Za-z0-9]/g,'')}"
+               placeholder="ex : 1001 VIES HABITAT" value=""
+               onkeydown="if(event.key==='Enter')setAgenceGroup(${i})">
+        <button class="btn btn-primary btn-sm" onclick="setAgenceGroup(${i})">Appliquer</button>
+      </div>` : ''}
       <div class="res-body">${lines}</div>
     </div>`;
   }).join('');
@@ -1756,6 +1811,7 @@ async function zipResidence(i) {
 loadPdfMap();
 data = load();
 fillBailleurs();
+fillAgenceDatalists();
 fillAgences();
 fillResAgences();
 fillResidenceDatalist();
@@ -1768,5 +1824,6 @@ initFirebase();
   el.addEventListener(id==='resSearch'?'input':'change', renderResidences);
 });
 </script>
+<div id="agence-datalists" style="display:none"></div>
 </body>
 </html>
