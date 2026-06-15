@@ -115,6 +115,8 @@
   .stat-facture { background: var(--green-soft); color: var(--green); }
   .stat-a_facturer { background: var(--amber-soft); color: var(--amber); }
   .row-inactive td { opacity: .55; }
+  tr.row-selected td { background: var(--orange-soft); }
+  .gestion-check, #gestionCheckAll { width: 17px; height: 17px; accent-color: var(--orange); cursor: pointer; }
   .tabs { display: flex; gap: 4px; margin-bottom: 18px; border-bottom: 2px solid var(--line); }
   .tab { padding: 10px 20px; cursor: pointer; font-weight: 600; font-size: 14px; color: var(--muted); border-bottom: 3px solid transparent; margin-bottom: -2px; }
   .tab.active { color: var(--navy); border-bottom-color: var(--orange); }
@@ -257,6 +259,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
   <div class="tabs">
     <div class="tab active" id="tab-liste" onclick="switchTab('liste')">Liste des devis</div>
     <div class="tab" id="tab-residence" onclick="switchTab('residence')">Vue par résidence</div>
+    <div class="tab" id="tab-gestion" onclick="switchTab('gestion')">Résidences</div>
     <div class="tab" id="tab-doublons" onclick="switchTab('doublons')">Doublons résidences</div>
   </div>
 
@@ -386,6 +389,37 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     </div>
     <div id="dupStats" style="margin-bottom:14px;font-size:13px;color:var(--muted);"></div>
     <div id="dupList"></div>
+  </div>
+
+  <div id="view-gestion" style="display:none;">
+    <div class="merge-bar hidden" id="gestionBar">
+      <span class="mb-count" id="gestionCount">0 sélectionnée(s)</span>
+      <span class="mb-label">Agence :</span>
+      <input type="text" id="gestionAgence" list="agence-list-all" placeholder="ex : 1001 VIES HABITAT">
+      <button class="btn btn-primary btn-sm" onclick="gestionRattacher()">Rattacher à l'agence</button>
+      <span class="mb-label" style="margin-left:8px;">|</span>
+      <button class="btn btn-primary btn-sm" onclick="gestionFusionner()">Fusionner</button>
+      <button class="btn btn-ghost btn-sm" onclick="gestionClear()">Annuler</button>
+    </div>
+    <div class="filters-row">
+      <input type="search" id="gestionSearch" placeholder="Rechercher une résidence…" style="flex:1;min-width:200px;padding:9px 13px;border:1px solid var(--line);border-radius:8px;font-size:14px;" oninput="renderGestion()">
+      <select class="filter" id="gestionBailleur" onchange="renderGestion()"><option value="">Tous bailleurs</option></select>
+    </div>
+    <div style="font-size:12.5px;color:var(--muted);margin-bottom:10px;">Coche des résidences, puis rattache-les à une agence ou fusionne-les. Une ligne par résidence (toutes agences confondues).</div>
+    <div class="table-card">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:34px;"><input type="checkbox" id="gestionCheckAll" onchange="gestionToggleAll(this.checked)" title="Tout cocher"></th>
+            <th onclick="gestionSort('res')">Résidence</th>
+            <th onclick="gestionSort('bailleur')">Bailleur</th>
+            <th onclick="gestionSort('agence')">Agence</th>
+            <th onclick="gestionSort('count')" style="text-align:right;">Nb devis</th>
+          </tr>
+        </thead>
+        <tbody id="gestionBody"></tbody>
+      </table>
+    </div>
   </div>
 </div>
 
@@ -1410,6 +1444,133 @@ function detectDoublons() {
 }
 
 let _dupGroups = [];
+/* ========== Onglet Résidences (gestion : rattacher agence + fusionner) ========== */
+let gestionSel = new Set();        // résidences cochées
+let gestionSortKey = { key:'count', dir:-1 };
+
+function gestionRows() {
+  // une ligne par résidence (toutes agences confondues), hors NON IDENTIFIÉE
+  const map = {};
+  data.forEach(x => {
+    const r = x.residence || 'NON IDENTIFIÉE';
+    if (r === 'NON IDENTIFIÉE') return;
+    if (!map[r]) map[r] = { res:r, count:0, bailleurs:new Set(), agences:new Set() };
+    map[r].count++;
+    map[r].bailleurs.add(x.bailleur||'ERILIA');
+    map[r].agences.add(x.agence||'À RATTACHER');
+  });
+  return Object.values(map).map(g => ({
+    res: g.res, count: g.count,
+    bailleur: [...g.bailleurs].sort().join(', '),
+    agence: [...g.agences].sort().join(', ')
+  }));
+}
+
+function fillGestionBailleur() {
+  const sel = document.getElementById('gestionBailleur');
+  if (!sel) return;
+  const cur = sel.value;
+  sel.querySelectorAll('option:not(:first-child)').forEach(o=>o.remove());
+  bailleurList().forEach(b => { const o=document.createElement('option'); o.value=b; o.textContent=b; sel.appendChild(o); });
+  if ([...sel.options].some(o=>o.value===cur)) sel.value=cur;
+}
+
+function gestionSort(key) {
+  if (gestionSortKey.key === key) gestionSortKey.dir *= -1;
+  else gestionSortKey = { key, dir: key==='count' ? -1 : 1 };
+  renderGestion();
+}
+
+function renderGestion() {
+  fillGestionBailleur();
+  const q = (document.getElementById('gestionSearch').value||'').toLowerCase().trim();
+  const fb = document.getElementById('gestionBailleur').value;
+  let rows = gestionRows();
+  if (fb) rows = rows.filter(r => r.bailleur.split(', ').includes(fb));
+  if (q) rows = rows.filter(r => r.res.toLowerCase().includes(q));
+  const { key, dir } = gestionSortKey;
+  rows.sort((a,b) => {
+    let va=a[key], vb=b[key];
+    if (key==='count') return (va-vb)*dir;
+    return String(va).localeCompare(String(vb))*dir;
+  });
+  const body = document.getElementById('gestionBody');
+  if (!rows.length) { body.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:20px;">Aucune résidence</td></tr>`; updateGestionBar(); return; }
+  body.innerHTML = rows.map(r => {
+    const checked = gestionSel.has(r.res) ? 'checked' : '';
+    const torattach = r.agence === 'À RATTACHER';
+    return `<tr class="${gestionSel.has(r.res)?'row-selected':''}">
+      <td><input type="checkbox" class="gestion-check" ${checked} onchange="gestionToggle('${esc(r.res).replace(/'/g,"\\'")}')"></td>
+      <td><strong>${esc(r.res)}</strong></td>
+      <td>${esc(r.bailleur)}</td>
+      <td>${torattach ? '<span style="color:#c0392b;">À RATTACHER</span>' : esc(r.agence)}</td>
+      <td style="text-align:right;">${r.count}</td>
+    </tr>`;
+  }).join('');
+  // état du "tout cocher"
+  const all = document.getElementById('gestionCheckAll');
+  if (all) all.checked = rows.every(r => gestionSel.has(r.res)) && rows.length>0;
+  updateGestionBar();
+}
+
+function gestionToggle(res) {
+  if (gestionSel.has(res)) gestionSel.delete(res); else gestionSel.add(res);
+  renderGestion();
+}
+function gestionToggleAll(on) {
+  const q = (document.getElementById('gestionSearch').value||'').toLowerCase().trim();
+  const fb = document.getElementById('gestionBailleur').value;
+  let rows = gestionRows();
+  if (fb) rows = rows.filter(r => r.bailleur.split(', ').includes(fb));
+  if (q) rows = rows.filter(r => r.res.toLowerCase().includes(q));
+  rows.forEach(r => { if (on) gestionSel.add(r.res); else gestionSel.delete(r.res); });
+  renderGestion();
+}
+function gestionClear() { gestionSel.clear(); renderGestion(); }
+
+function updateGestionBar() {
+  const bar = document.getElementById('gestionBar');
+  const cnt = document.getElementById('gestionCount');
+  if (!bar) return;
+  if (gestionSel.size < 1) { bar.classList.add('hidden'); return; }
+  bar.classList.remove('hidden');
+  cnt.textContent = `${gestionSel.size} résidence(s) sélectionnée(s)`;
+}
+
+function gestionRattacher() {
+  if (!gestionSel.size) return;
+  const ag = (document.getElementById('gestionAgence').value||'').trim().toUpperCase();
+  if (!ag) { alert("Saisis une agence à rattacher."); document.getElementById('gestionAgence').focus(); return; }
+  const names = new Set(gestionSel);
+  if (!confirm(`Rattacher tous les devis de ${names.size} résidence(s) à l'agence « ${ag} » ?`)) return;
+  let n = 0;
+  data.forEach(x => { if (names.has(x.residence)) { x.agence = ag; n++; } });
+  save();
+  gestionSel.clear();
+  document.getElementById('gestionAgence').value = '';
+  fillAgences(); fillBailleurs(); fillAgenceDatalists();
+  renderGestion(); render();
+  alert(`✓ ${n} devis rattachés à l'agence « ${ag} ».`);
+}
+
+function gestionFusionner() {
+  if (gestionSel.size < 2) { alert("Sélectionne au moins 2 résidences à fusionner."); return; }
+  const names = [...gestionSel];
+  const counts = residenceCounts();
+  // proposer par défaut le nom le plus fréquent
+  const def = names.slice().sort((a,b)=>(counts[b]||0)-(counts[a]||0))[0];
+  const target = (prompt(`Fusionner ${names.length} résidences :\n\n• ${names.join('\n• ')}\n\nNom à conserver :`, def)||'').trim().toUpperCase();
+  if (!target) return;
+  const set = new Set(names);
+  let n = 0;
+  data.forEach(x => { if (set.has(x.residence)) { x.residence = target; n++; } });
+  save();
+  gestionSel.clear();
+  fillResidenceDatalist(); fillResidenceFilter();
+  renderGestion(); render();
+  alert(`✓ ${n} devis fusionnés sous « ${target} ».`);
+}
+
 function renderDoublons() {
   _dupGroups = detectDoublons();
   const wrap = document.getElementById('dupList');
@@ -1494,11 +1655,14 @@ function restoreDup(sig) {
 function switchTab(t) {
   document.getElementById('tab-liste').classList.toggle('active', t==='liste');
   document.getElementById('tab-residence').classList.toggle('active', t==='residence');
+  document.getElementById('tab-gestion').classList.toggle('active', t==='gestion');
   document.getElementById('tab-doublons').classList.toggle('active', t==='doublons');
   document.getElementById('view-liste').style.display = t==='liste' ? '' : 'none';
   document.getElementById('view-residence').style.display = t==='residence' ? '' : 'none';
+  document.getElementById('view-gestion').style.display = t==='gestion' ? '' : 'none';
   document.getElementById('view-doublons').style.display = t==='doublons' ? '' : 'none';
   if (t==='residence') renderResidences();
+  if (t==='gestion') renderGestion();
   if (t==='doublons') renderDoublons();
 }
 
@@ -1593,10 +1757,12 @@ function fillAgenceDatalists() {
     if (a === 'À RATTACHER') return;
     (byBailleur[b] = byBailleur[b] || new Set()).add(a);
   });
+  const allAgences = new Set();
+  data.forEach(x => { const a = x.agence||'À RATTACHER'; if (a!=='À RATTACHER') allAgences.add(a); });
   host.innerHTML = Object.entries(byBailleur).map(([b, set]) => {
     const id = 'agence-list-' + b.replace(/[^A-Za-z0-9]/g,'');
     return `<datalist id="${id}">${[...set].sort().map(a=>`<option value="${esc(a)}">`).join('')}</datalist>`;
-  }).join('');
+  }).join('') + `<datalist id="agence-list-all">${[...allAgences].sort().map(a=>`<option value="${esc(a)}">`).join('')}</datalist>`;
 }
 function existingResidences() {
   const set = new Set();
