@@ -162,6 +162,10 @@
   .pill-overdue { background: var(--red-soft); color: var(--red); padding: 1px 7px; border-radius: 6px; font-size: 11px; font-weight: 700; margin-left: 6px; }
 
   .actions-cell { display: flex; gap: 6px; white-space: nowrap; }
+  .res-edit-cell { min-width: 150px; }
+  .res-inline { width: 100%; max-width: 180px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; font-size: 12.5px; font-family: inherit; text-transform: uppercase; background: #fff; }
+  .res-inline:focus { outline: 2px solid var(--orange); outline-offset: -1px; border-color: var(--orange); }
+  .res-inline::placeholder { color: #c0392b; text-transform: none; font-style: italic; }
   .icon-btn { background: none; border: 1px solid var(--line); border-radius: 7px; padding: 5px 8px; cursor: pointer; font-size: 13px; line-height: 1; }
   .icon-btn:hover { background: #f0f2f6; }
   .icon-btn.danger:hover { background: var(--red-soft); border-color: var(--red); }
@@ -265,6 +269,9 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     <select class="filter" id="filterAgence">
       <option value="">Toutes agences</option>
     </select>
+    <select class="filter" id="filterResidence">
+      <option value="">Toutes résidences</option>
+    </select>
     <select class="filter" id="filterStatut">
       <option value="actif">À relancer (actifs)</option>
       <option value="">Tous statuts</option>
@@ -288,6 +295,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
         <tr>
           <th onclick="sortBy('devis')">N° devis</th>
           <th onclick="sortBy('client')">Client / Bailleur</th>
+          <th onclick="sortBy('residence')">Résidence</th>
           <th onclick="sortBy('montant')">Montant TTC</th>
           <th onclick="sortBy('dateEnvoi')" class="hide-sm">Envoyé le</th>
           <th onclick="sortBy('niveau')">Relance</th>
@@ -543,6 +551,7 @@ function refreshAll() {
     if (fa) { const v=fa.value; fa.querySelectorAll('option:not(:first-child)').forEach(o=>o.remove()); fillAgences(); fa.value=v; }
     if (ra) { const v=ra.value; ra.querySelectorAll('option:not(:first-child)').forEach(o=>o.remove()); fillResAgences(); ra.value=v; }
     fillResidenceDatalist();
+    fillResidenceFilter();
     updatePdfStatus();
   } catch {}
   render();
@@ -726,13 +735,15 @@ function getFiltered() {
   const fd = document.getElementById('filterDue').value;
   const ft = document.getElementById('filterType').value;
   const fa = document.getElementById('filterAgence').value;
+  const fres = document.getElementById('filterResidence').value;
   const fs = document.getElementById('filterStatut').value;
   const fe = document.getElementById('filterExpire').value;
   let list = data.filter(x => {
-    if (q && !(`${x.devis} ${x.client} ${x.objet||''} ${x.contact||''}`.toLowerCase().includes(q))) return false;
+    if (q && !(`${x.devis} ${x.client} ${x.objet||''} ${x.contact||''} ${x.residence||''}`.toLowerCase().includes(q))) return false;
     if (fl !== '' && String(x.niveau||0) !== fl) return false;
     if (ft !== '' && (x.type||'travaux') !== ft) return false;
     if (fa !== '' && (x.agence||'À RATTACHER') !== fa) return false;
+    if (fres !== '' && (x.residence||'NON IDENTIFIÉE') !== fres) return false;
     if (fs !== '' && (x.statut||'actif') !== fs) return false;
     const exp = isExpired(x);
     if (fe === 'active' && exp) return false;
@@ -771,6 +782,13 @@ function render() {
         ${x.objet?`<div class="client-sub">${esc(truncate(x.objet,68))}</div>`:''}
       </td>
       <td>${esc(x.client)}<div class="client-sub">${esc(x.agence||'À RATTACHER')}${x.contact?' · '+esc(x.contact):''}</div></td>
+      <td class="res-edit-cell">
+        <input type="text" class="res-inline" id="resinline-${x.id}" list="residence-list"
+               value="${x.residence && x.residence!=='NON IDENTIFIÉE' ? esc(x.residence) : ''}"
+               placeholder="À renseigner"
+               onchange="setResidenceInline('${x.id}', this.value)"
+               onkeydown="if(event.key==='Enter')this.blur()">
+      </td>
       <td class="money-cell">${fmtMoney(x.montant)}</td>
       <td class="hide-sm">${fmtDate(x.dateEnvoi)}</td>
       <td>${levelBadge(x.niveau||0)}</td>
@@ -946,7 +964,27 @@ function fillAgences() {
   const sel = document.getElementById('filterAgence');
   agencyList().forEach(a => { const o = document.createElement('option'); o.value = a; o.textContent = a; sel.appendChild(o); });
 }
-['search','filterLevel','filterDue','filterType','filterAgence','filterStatut','filterExpire'].forEach(id => {
+function fillResidenceFilter() {
+  const sel = document.getElementById('filterResidence');
+  if (!sel) return;
+  const cur = sel.value;
+  // garder la 1ère option, retirer les autres
+  sel.querySelectorAll('option:not(:first-child)').forEach(o => o.remove());
+  const set = {};
+  data.forEach(x => { const r = x.residence || 'NON IDENTIFIÉE'; set[r] = (set[r]||0)+1; });
+  // tri alpha, NON IDENTIFIÉE à la fin
+  const names = Object.keys(set).sort((a,b) => {
+    if (a==='NON IDENTIFIÉE') return 1; if (b==='NON IDENTIFIÉE') return -1;
+    return a.localeCompare(b);
+  });
+  names.forEach(r => {
+    const o = document.createElement('option');
+    o.value = r; o.textContent = `${r} (${set[r]})`;
+    sel.appendChild(o);
+  });
+  if ([...sel.options].some(o => o.value === cur)) sel.value = cur;
+}
+['search','filterLevel','filterDue','filterType','filterAgence','filterResidence','filterStatut','filterExpire'].forEach(id => {
   const el = document.getElementById(id);
   el.addEventListener(id==='search'?'input':'change', render);
 });
@@ -1161,6 +1199,7 @@ function mergeDup(i) {
   card.classList.add('merged');
   card.innerHTML = `<div class="merged-tag">✓ Fusionné : ${n} devis rattachés à « ${esc(target)} »</div>`;
   fillResidenceDatalist();
+  fillResidenceFilter();
 }
 
 function ignoreDup(i) {
@@ -1248,12 +1287,35 @@ function existingResidences() {
   return [...set];
 }
 function findSimilarResidence(val) {
-  // 1) correspondance exacte déjà gérée ailleurs ; ici on cherche une proximité forte
+  // Cherche une résidence existante de même "signature" et PLUS fréquente que la saisie.
   const sig = resSignature(val);
-  const exact = existingResidences().find(r => r.toUpperCase() === val.toUpperCase());
-  if (exact) return null; // déjà existant à l'identique, pas de doublon créé
-  const match = existingResidences().find(r => resSignature(r) === sig);
-  return match || null;
+  const counts = {};
+  data.forEach(x => { const r = x.residence; if (r && r !== 'NON IDENTIFIÉE') counts[r] = (counts[r]||0)+1; });
+  const valCount = counts[val.toUpperCase()] || 0;
+  const sameSig = Object.keys(counts).filter(r =>
+    resSignature(r) === sig && r.toUpperCase() !== val.toUpperCase() && counts[r] > valCount
+  );
+  if (!sameSig.length) return null;
+  sameSig.sort((a,b) => counts[b] - counts[a]);
+  return sameSig[0];
+}
+
+function setResidenceInline(id, value) {
+  let val = (value||'').trim().toUpperCase();
+  const x = data.find(d => d.id === id);
+  if (!x) return;
+  if (!val) { x.residence = 'NON IDENTIFIÉE'; save(); fillResidenceDatalist(); fillResidenceFilter(); render(); return; }
+  const similar = findSimilarResidence(val);
+  if (similar && similar.toUpperCase() !== val) {
+    if (confirm(`Une résidence très proche existe déjà :\n\n« ${similar} »\n\nUtiliser ce nom existant plutôt que « ${val} » ?`)) {
+      val = similar;
+    }
+  }
+  x.residence = val;
+  save();
+  fillResidenceDatalist();
+  fillResidenceFilter();
+  render();
 }
 
 function setResidence(id) {
@@ -1273,6 +1335,7 @@ function setResidence(id) {
   x.residence = val;
   save();
   fillResidenceDatalist();
+  fillResidenceFilter();
   renderResidences();
   render();
 }
@@ -1374,6 +1437,7 @@ data = load();
 fillAgences();
 fillResAgences();
 fillResidenceDatalist();
+fillResidenceFilter();
 updatePdfStatus();
 render();
 initFirebase();
